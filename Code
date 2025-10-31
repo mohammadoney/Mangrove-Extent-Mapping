@@ -1,0 +1,52 @@
+// Define the boundary of Bangladesh using a FeatureCollection
+var bangladesh = ee.FeatureCollection("FAO/GAUL/2015/level0")
+    .filter(ee.Filter.eq('ADM0_NAME', 'Bangladesh'));
+
+// Use the Global Mangrove Forests Distribution dataset
+var mangroves = ee.Image("LANDSAT/MANGROVE_FORESTS/2000");
+
+// Extract mangrove pixels within Bangladesh
+var bangladeshMangroves = mangroves.clip(bangladesh);
+
+// Create mangrove mask (mangrove = 1, non-mangrove = 0)
+var mangroveMask = bangladeshMangroves.gt(0);
+
+// Convert mangrove pixels to vectors/geometry
+var mangroveGeometry = mangroveMask.reduceToVectors({
+  geometry: bangladesh,
+  scale: 30,  // Increased scale for better performance
+  geometryType: 'polygon',
+  reducer: ee.Reducer.countEvery(),
+  maxPixels: 1e13,
+  bestEffort: true
+});
+
+// Filter out very small polygons (noise reduction) - increased threshold
+var filteredMangroves = mangroveGeometry.filter(ee.Filter.gt('count', 50));
+
+print('Number of polygons before merge:', filteredMangroves.size());
+
+// METHOD 1: Dissolve with error margin (recommended)
+var mergedMangroveGeometry = filteredMangroves.geometry().dissolve(1); // 100 meter error margin
+
+// METHOD 2: Alternative approach using union
+// var mergedMangroveGeometry = filteredMangroves.union(100);
+
+// Convert to a single feature
+var mergedMangroveFeature = ee.Feature(mergedMangroveGeometry);
+
+// Display the results
+Map.centerObject(bangladesh, 7);
+Map.addLayer(bangladesh, {color: 'lightgray'}, 'Bangladesh Boundary');
+Map.addLayer(mergedMangroveFeature, {color: 'red', fillColor: 'FF000020'}, 'Merged Mangrove Polygon');
+
+// Print information
+print('Merged polygon geometry:', mergedMangroveGeometry);
+print('Area of mangroves (sq km):', mergedMangroveGeometry.area().divide(1000000));
+
+// Export as Earth Engine Asset
+Export.table.toAsset({
+  collection: ee.FeatureCollection([mergedMangroveFeature]),
+  description: 'All_Mangroves_Bangladesh_Asset',
+  assetId: 'All_Mangroves_Bangladesh_Asset'
+});
